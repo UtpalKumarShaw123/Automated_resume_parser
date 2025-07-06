@@ -1,0 +1,98 @@
+ app.py (Main Python Script)
+
+from flask import Flask, render_template, request
+import os
+import spacy
+import pdfplumber
+import docx
+import re
+from werkzeug.utils import secure_filename
+
+# Initialize Flask app
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'uploads'
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Load spaCy model
+nlp = spacy.load("en_core_web_sm")
+
+# ---------------------
+# File Parsing Functions
+# ---------------------
+def extract_text_from_pdf(file_path):
+    with pdfplumber.open(file_path) as pdf:
+        return '\n'.join([page.extract_text() for page in pdf.pages if page.extract_text()])
+
+def extract_text_from_docx(file_path):
+    doc = docx.Document(file_path)
+    return '\n'.join([para.text for para in doc.paragraphs])
+
+# ---------------------
+# Entity Extraction
+# ---------------------
+def extract_entities(text):
+    doc = nlp(text)
+    email = re.findall(r'\S+@\S+', text)
+    phone = re.findall(r'\+?\d[\d -]{8,12}\d', text)
+    return {
+        "name": doc.ents[0].text if doc.ents else "N/A",
+        "email": email[0] if email else "N/A",
+        "phone": phone[0] if phone else "N/A",
+        "raw_text": text[:500] + '...'  # preview
+    }
+
+# ---------------------
+# Flask Routes
+# ---------------------
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    result = None
+    if request.method == 'POST':
+        file = request.files['resume']
+        if file:
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            ext = filename.split('.')[-1].lower()
+
+            if ext == 'pdf':
+                text = extract_text_from_pdf(file_path)
+            elif ext == 'docx':
+                text = extract_text_from_docx(file_path)
+            else:
+                return "Unsupported file format"
+
+            result = extract_entities(text)
+    return render_template('index.html', result=result)
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+ templates.html
+
+Make a folder named templates, then add this file inside:
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Resume Parser</title>
+</head>
+<body>
+  <h2>Upload Resume</h2>
+  <form method="POST" enctype="multipart/form-data">
+    <input type="file" name="resume" required />
+    <button type="submit">Upload</button>
+  </form>
+
+  {% if result %}
+    <h3>Extracted Info:</h3>
+    <p><b>Name:</b> {{ result.name }}</p>
+    <p><b>Email:</b> {{ result.email }}</p>
+    <p><b>Phone:</b> {{ result.phone }}</p>
+    <p><b>Text Preview:</b><br>{{ result.raw_text }}</p>
+  {% endif %}
+</body>
+</html>
+
